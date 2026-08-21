@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+import { boolean, index, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -60,3 +60,27 @@ export const progressEntries = mysqlTable("progress_entries", {
   notes: text("notes"),
   recordedAt: timestamp("recordedAt").defaultNow().notNull(),
 });
+
+export const automationSchedules = mysqlTable(
+  "automation_schedules",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id),
+    title: varchar("title", { length: 120 }).notNull(),
+    specification: text("specification").notNull(),
+    cadence: varchar("cadence", { length: 24 }).notNull(),
+    cronExpression: varchar("cronExpression", { length: 96 }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+    enabled: boolean("enabled").notNull().default(true),
+    scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
+    nextExecutionAt: timestamp("nextExecutionAt"),
+    lastRunAt: timestamp("lastRunAt"),
+    lastRunMessage: varchar("lastRunMessage", { length: 240 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => ({
+    userIdIndex: index("automation_schedules_user_id_index").on(table.userId),
+    taskUidIndex: index("automation_schedules_task_uid_index").on(table.scheduleCronTaskUid),
+  })
+);

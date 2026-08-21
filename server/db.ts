@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, mealFeedback, progressEntries, userProfiles, users } from "../drizzle/schema";
+import { automationSchedules, InsertUser, mealFeedback, progressEntries, userProfiles, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -137,4 +137,67 @@ export async function addProgressEntry(input: { userId: number; weightKg: number
     weightDeciKg: Math.round(input.weightKg * 10),
     notes: input.notes ?? null,
   });
+}
+
+const asDate = (value?: string | Date | null) => value ? new Date(value) : null;
+
+export async function listAutomationSchedules(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(automationSchedules).where(eq(automationSchedules.userId, userId)).orderBy(desc(automationSchedules.createdAt));
+}
+
+export async function getAutomationScheduleForUser(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(automationSchedules).where(and(eq(automationSchedules.id, id), eq(automationSchedules.userId, userId))).limit(1))[0];
+}
+
+export async function getAutomationScheduleByTaskUid(taskUid: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return (await db.select().from(automationSchedules).where(eq(automationSchedules.scheduleCronTaskUid, taskUid)).limit(1))[0];
+}
+
+export async function createAutomationSchedule(input: {
+  userId: number;
+  title: string;
+  specification: string;
+  cadence: string;
+  cronExpression: string;
+  scheduleCronTaskUid: string;
+  nextExecutionAt?: string | Date | null;
+}) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.insert(automationSchedules).values({
+    ...input,
+    timezone: "UTC",
+    enabled: true,
+    nextExecutionAt: asDate(input.nextExecutionAt),
+  });
+  const id = result[0].insertId;
+  return getAutomationScheduleForUser(Number(id), input.userId);
+}
+
+export async function setAutomationScheduleEnabled(input: { id: number; userId: number; enabled: boolean; nextExecutionAt?: string | Date | null }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(automationSchedules).set({ enabled: input.enabled, nextExecutionAt: asDate(input.nextExecutionAt) }).where(and(eq(automationSchedules.id, input.id), eq(automationSchedules.userId, input.userId)));
+}
+
+export async function deleteAutomationSchedule(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(automationSchedules).where(and(eq(automationSchedules.id, id), eq(automationSchedules.userId, userId)));
+}
+
+/** Idempotent scheduled-work record: retries land on the same current-state outcome. */
+export async function recordAutomationScheduleRun(taskUid: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const schedule = await getAutomationScheduleByTaskUid(taskUid);
+  if (!schedule || !schedule.enabled) return schedule;
+  await db.update(automationSchedules).set({ lastRunAt: new Date(), lastRunMessage: "Your scheduled wellness check-in is ready." }).where(eq(automationSchedules.id, schedule.id));
+  return schedule;
 }

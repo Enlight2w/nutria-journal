@@ -1,10 +1,14 @@
 import { COOKIE_NAME } from "@shared/const";
+import { buildScheduleCron, cadenceLabel, type AutomationCadence } from "@shared/automation";
 import { calculateTargets, type NutritionProfile } from "@shared/nutrition";
-import { addMealFeedback, addProgressEntry, upsertNutritionProfile } from "./db";
+import { addMealFeedback, addProgressEntry, createAutomationSchedule, deleteAutomationSchedule, getAutomationScheduleForUser, listAutomationSchedules, setAutomationScheduleEnabled, upsertNutritionProfile } from "./db";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { createHeartbeatJob, deleteHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { parse as parseCookie } from "cookie";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
 const profileSchema = z.object({
@@ -32,6 +36,22 @@ const coachInputSchema = z.object({
 function createCoachBrief(profile: NutritionProfile, progress: z.infer<typeof coachInputSchema>["progress"]) {
   const targets = calculateTargets(profile);
   return `The user is ${profile.age}, focused on ${profile.goal}, follows ${profile.dietaryPreference}, and describes their routine as ${profile.workoutRoutine}. Their day is ${progress.caloriesConsumed}/${targets.calorieTarget} kcal, ${progress.waterGlasses}/8 glasses of water, and a ${progress.streak}-day reflection streak. Preference signals: ${progress.preferenceSignals.join(", ") || "none yet"}.`;
+}
+
+const automationInputSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  specification: z.string().trim().min(8).max(1500),
+  cadence: z.enum(["daily", "weekdays", "weekly"]),
+  timeUtc: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use 24-hour HH:MM time."),
+  weekday: z.number().int().min(0).max(6),
+});
+
+function getHeartbeatSessionToken(cookieHeader: string | undefined) {
+  const sessionToken = parseCookie(cookieHeader ?? "")[COOKIE_NAME] ?? "";
+  if (!sessionToken) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Please sign in directly before creating a schedule." });
+  }
+  return sessionToken;
 }
 
 export const appRouter = router({
@@ -84,6 +104,51 @@ export const appRouter = router({
       });
       const message = completion.choices[0]?.message?.content;
       return { message: typeof message === "string" && message.trim() ? message : "I’m here with you. Let’s return to one small, steady action you can complete today." };
+    }),
+  }),
+  automation: router({
+    list: protectedProcedure.query(({ ctx }) => listAutomationSchedules(ctx.user.id)),
+    create: protectedProcedure.input(automationInputSchema).mutation(async ({ ctx, input }) => {
+      const sessionToken = getHeartbeatSessionToken(ctx.req.headers.cookie);
+      const cronExpression = buildScheduleCron(input.cadence as AutomationCadence, input.timeUtc, input.weekday);
+      const job = await createHeartbeatJob({
+        name: `nutria-${ctx.user.id}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+        cron: cronExpression,
+        path: "/api/scheduled/wellness-automation",
+        payload: { source: "nutria-journal" },
+        description: `${cadenceLabel(input.cadence as AutomationCadence, input.weekday)} wellness automation: ${input.title}`,
+      }, sessionToken);
+      try {
+        const schedule = await createAutomationSchedule({
+          userId: ctx.user.id,
+          title: input.title,
+          specification: input.specification,
+          cadence: input.cadence,
+          cronExpression,
+          scheduleCronTaskUid: job.taskUid,
+          nextExecutionAt: job.nextExecutionAt,
+        });
+        if (!schedule) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Schedule could not be saved." });
+        return schedule;
+      } catch (error) {
+        await deleteHeartbeatJob(job.taskUid, sessionToken).catch(() => undefined);
+        throw error;
+      }
+    }),
+    setEnabled: protectedProcedure.input(z.object({ id: z.number().int().positive(), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+      const schedule = await getAutomationScheduleForUser(input.id, ctx.user.id);
+      if (!schedule?.scheduleCronTaskUid) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found." });
+      const next = await updateHeartbeatJob(schedule.scheduleCronTaskUid, { enable: input.enabled }, getHeartbeatSessionToken(ctx.req.headers.cookie));
+      await setAutomationScheduleEnabled({ id: schedule.id, userId: ctx.user.id, enabled: input.enabled, nextExecutionAt: next.nextExecutionAt });
+      return { success: true } as const;
+    }),
+    remove: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      const schedule = await getAutomationScheduleForUser(input.id, ctx.user.id);
+      if (!schedule) throw new TRPCError({ code: "NOT_FOUND", message: "Schedule not found." });
+      const sessionToken = getHeartbeatSessionToken(ctx.req.headers.cookie);
+      if (schedule.scheduleCronTaskUid) await deleteHeartbeatJob(schedule.scheduleCronTaskUid, sessionToken);
+      await deleteAutomationSchedule(schedule.id, ctx.user.id);
+      return { success: true } as const;
     }),
   }),
 });

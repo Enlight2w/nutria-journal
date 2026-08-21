@@ -15,3 +15,6 @@
 - [x] Write and run Vitest coverage for calculator and personalized-plan logic.
 - [x] Verify desktop and mobile presentation, address console/runtime issues, and capture a completion checkpoint.
 - [x] Apply the supplied dark void, electric-iris, saffron, and verdant visual direction across navigation, onboarding, dashboard surfaces, typography, charts, and interactive states while preserving accessibility.
+- [x] Add a scheduling workspace where users can author automation specifications, select a schedule cadence, review upcoming runs, pause or resume schedules, and persist their preferences.
+- [x] Add schema, tRPC procedures, and Vitest coverage for user-owned automation schedule records.
+- [x] Verify the automation workspace on desktop and mobile, then capture a follow-up checkpoint.
