@@ -6,6 +6,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { createHeartbeatJob, deleteHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { invokeLLM, listLLMModels } from "./_core/llm";
 import { systemRouter } from "./_core/systemRouter";
+import { commerceRouter } from "./routers/commerce";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { parse as parseCookie } from "cookie";
 import { TRPCError } from "@trpc/server";
@@ -57,6 +58,7 @@ function getHeartbeatSessionToken(cookieHeader: string | undefined) {
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
+  commerce: commerceRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

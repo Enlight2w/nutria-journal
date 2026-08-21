@@ -18,3 +18,5 @@
 - [x] Add a scheduling workspace where users can author automation specifications, select a schedule cadence, review upcoming runs, pause or resume schedules, and persist their preferences.
 - [x] Add schema, tRPC procedures, and Vitest coverage for user-owned automation schedule records.
 - [x] Verify the automation workspace on desktop and mobile, then capture a follow-up checkpoint.
+- [x] Provision a fresh Shopify development store and connect it as Nutria Journal’s commerce backend.
+- [x] Review the connected Shopify integration and document the next storefront implementation step: expose the verified catalog through `trpc.commerce.products.list` and use the mounted cart provider when a dedicated Shop experience is added.
