@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, mealFeedback, progressEntries, userProfiles, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,52 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+export async function upsertNutritionProfile(input: {
+  userId: number;
+  age: number;
+  gender: string;
+  weightKg: number;
+  heightCm: number;
+  goal: string;
+  activityLevel: string;
+  dietaryPreference: string;
+  workoutRoutine: string;
+}) {
+  const db = await getDb();
+  if (!db) return;
+
+  const values = {
+    userId: input.userId,
+    age: input.age,
+    gender: input.gender,
+    weightDeciKg: Math.round(input.weightKg * 10),
+    heightCm: input.heightCm,
+    goal: input.goal,
+    activityLevel: input.activityLevel,
+    dietaryPreference: input.dietaryPreference,
+    workoutRoutine: input.workoutRoutine,
+  };
+
+  await db.insert(userProfiles).values(values).onDuplicateKeyUpdate({ set: values });
+}
+
+export async function addMealFeedback(input: {
+  userId: number;
+  mealId: string;
+  signal: "saved" | "skipped" | "rated";
+  rating?: number;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(mealFeedback).values(input);
+}
+
+export async function addProgressEntry(input: { userId: number; weightKg: number; notes?: string }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(progressEntries).values({
+    userId: input.userId,
+    weightDeciKg: Math.round(input.weightKg * 10),
+    notes: input.notes ?? null,
+  });
+}
